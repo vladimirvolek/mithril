@@ -70,10 +70,15 @@ pub struct MithrilUnstableClient {
 impl MithrilClient {
     /// Constructor for wasm client
     #[wasm_bindgen(constructor)]
-    pub fn new(aggregator_endpoint: &str, genesis_verification_key: &str) -> MithrilClient {
+    pub fn new(
+        aggregator_endpoint: &str,
+        genesis_verification_key: &str,
+        custom_headers: Option<HeaderMap>,
+    ) -> MithrilClient {
         let feedback_receiver = Arc::new(JSBroadcastChannelFeedbackReceiver::new("mithril-client"));
         let client = ClientBuilder::aggregator(aggregator_endpoint, genesis_verification_key)
             .add_feedback_receiver(feedback_receiver)
+            .with_custom_headers(custom_headers.unwrap_or_else(HeaderMap::new))
             .build()
             .map_err(|err| format!("{err:?}"))
             .unwrap();
