@@ -1,5 +1,6 @@
 use anyhow::{anyhow, Context};
 use mithril_common::api_version::APIVersionProvider;
+use reqwest::header::HeaderMap;
 use reqwest::Url;
 use slog::{o, Logger};
 use std::sync::Arc;
@@ -62,12 +63,17 @@ pub struct ClientBuilder {
     snapshot_downloader: Option<Arc<dyn SnapshotDownloader>>,
     logger: Option<Logger>,
     feedback_receivers: Vec<Arc<dyn FeedbackReceiver>>,
+    custom_headers: Option<HeaderMap>,
 }
 
 impl ClientBuilder {
     /// Constructs a new `ClientBuilder` that fetches data from the aggregator at the given
     /// endpoint and with the given genesis verification key.
-    pub fn aggregator(endpoint: &str, genesis_verification_key: &str) -> ClientBuilder {
+    pub fn aggregator(
+        endpoint: &str,
+        genesis_verification_key: &str,
+        custom_headers: Option<HeaderMap>,
+    ) -> ClientBuilder {
         Self {
             aggregator_endpoint: Some(endpoint.to_string()),
             genesis_verification_key: genesis_verification_key.to_string(),
@@ -77,6 +83,7 @@ impl ClientBuilder {
             snapshot_downloader: None,
             logger: None,
             feedback_receivers: vec![],
+            custom_headers,
         }
     }
 
@@ -84,7 +91,7 @@ impl ClientBuilder {
     ///
     /// Use [ClientBuilder::aggregator] if you don't need to set a custom [AggregatorClient]
     /// to request data from the aggregator.
-    pub fn new(genesis_verification_key: &str) -> ClientBuilder {
+    pub fn new(genesis_verification_key: &str, custom_headers: Option<HeaderMap>) -> ClientBuilder {
         Self {
             aggregator_endpoint: None,
             genesis_verification_key: genesis_verification_key.to_string(),
@@ -94,6 +101,7 @@ impl ClientBuilder {
             snapshot_downloader: None,
             logger: None,
             feedback_receivers: vec![],
+            custom_headers,
         }
     }
 
@@ -123,6 +131,7 @@ impl ClientBuilder {
                         APIVersionProvider::compute_all_versions_sorted()
                             .with_context(|| "Could not compute aggregator api versions")?,
                         logger.clone(),
+                        self.custom_headers,
                     )
                     .with_context(|| "Building aggregator client failed")?,
                 )

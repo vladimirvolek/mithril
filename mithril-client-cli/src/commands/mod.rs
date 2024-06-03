@@ -19,6 +19,7 @@ pub(crate) fn client_builder(params: &ConfigParameters) -> MithrilResult<ClientB
     let builder = ClientBuilder::aggregator(
         &params.require("aggregator_endpoint")?,
         &params.require("genesis_verification_key")?,
+        None,
     )
     .with_logger(logger());
 
@@ -40,6 +41,7 @@ pub(crate) fn client_builder_with_fallback_genesis_key(
             "genesis_verification_key",
             fallback_genesis_verification_key,
         ),
+        None,
     )
     .with_logger(logger());
 

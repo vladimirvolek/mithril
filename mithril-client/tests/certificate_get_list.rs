@@ -10,7 +10,7 @@ async fn certificate_get_list() {
         mithril_common::test_utils::fake_keys::genesis_verification_key()[0];
     let fake_aggregator = FakeAggregator::new();
     let test_http_server = fake_aggregator.spawn_with_certificate(&certificate_hash_list);
-    let client = ClientBuilder::aggregator(&test_http_server.url(), genesis_verification_key)
+    let client = ClientBuilder::aggregator(&test_http_server.url(), genesis_verification_key, None)
         .build()
         .expect("Should be able to create a Client");
 

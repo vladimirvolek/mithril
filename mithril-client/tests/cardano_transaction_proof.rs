@@ -13,7 +13,7 @@ async fn cardano_transaction_proof_get_validate() {
     let fake_aggregator = FakeAggregator::new();
     let test_http_server =
         fake_aggregator.spawn_with_transactions_proofs(&transactions_hashes, certificate_hash);
-    let client = ClientBuilder::aggregator(&test_http_server.url(), genesis_verification_key)
+    let client = ClientBuilder::aggregator(&test_http_server.url(), genesis_verification_key, None)
         .with_certificate_verifier(FakeCertificateVerifier::build_that_validate_any_certificate())
         .build()
         .expect("Should be able to create a Client");

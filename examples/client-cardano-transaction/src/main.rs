@@ -43,10 +43,13 @@ async fn main() -> MithrilResult<()> {
         .map(|s| s.as_str())
         .collect::<Vec<&str>>();
     let logger = build_logger();
-    let client =
-        ClientBuilder::aggregator(&args.aggregator_endpoint, &args.genesis_verification_key)
-            .with_logger(logger.clone())
-            .build()?;
+    let client = ClientBuilder::aggregator(
+        &args.aggregator_endpoint,
+        &args.genesis_verification_key,
+        None,
+    )
+    .with_logger(logger.clone())
+    .build()?;
 
     info!(logger, "Fetching a proof for the given transactions...",);
     let cardano_transaction_proof = client
@@ -101,7 +104,7 @@ pub fn log_certify_information(
     if !non_certified_transactions.is_empty() {
         println!(
             r###"No proof could be computed for Cardano transactions with hashes "'{}'".
-            
+
             Mithril may not have signed those transactions yet, please try again later."###,
             non_certified_transactions.join(","),
         );
