@@ -72,12 +72,21 @@ impl MithrilClient {
     #[wasm_bindgen(constructor)]
     pub fn new(aggregator_endpoint: &str, genesis_verification_key: &str) -> MithrilClient {
         let feedback_receiver = Arc::new(JSBroadcastChannelFeedbackReceiver::new("mithril-client"));
-        let client = ClientBuilder::aggregator(aggregator_endpoint, genesis_verification_key)
-            .add_feedback_receiver(feedback_receiver)
+
+        let mut builder = ClientBuilder::aggregator(aggregator_endpoint, genesis_verification_key)
+            .add_feedback_receiver(feedback_receiver);
+
+        // Add additional headers if they are provided
+        if let Some(headers_map) = additional_headers {
+            let headers = process_additional_headers(headers_map);
+            builder = builder.with_additional_headers(headers);
+        }
+
+        let client = builder
             .build()
-            .map_err(|err| format!("{err:?}"))
-            .unwrap();
+            .map_err(|err| JsValue::from_str(&format!("{:?}", err)))?;
         let unstable = MithrilUnstableClient::new(client.clone());
+
         MithrilClient { client, unstable }
     }
 
@@ -292,6 +301,30 @@ impl MithrilUnstableClient {
 
         Ok(serde_wasm_bindgen::to_value(&result)?)
     }
+}
+
+fn process_additional_headers(headers_map: &js_sys::Map) -> Result<HeaderMap, JsValue> {
+    let mut headers = HeaderMap::new();
+    for entry in js_sys::try_iter(headers_map)
+        .map_err(|e| JsValue::from_str(&format!("Failed to iterate headers: {:?}", e)))?
+    {
+        let (key, value) = entry?
+            .into_tuple()
+            .ok_or_else(|| JsValue::from_str("Invalid header entry"))?;
+
+        if let (Some(key), Some(value)) = (key.as_string(), value.as_string()) {
+            headers.insert(
+                HeaderName::from_bytes(key.as_bytes())
+                    .map_err(|e| JsValue::from_str(&format!("Invalid header name: {:?}", e)))?,
+                HeaderValue::from_str(&value)
+                    .map_err(|e| JsValue::from_str(&format!("Invalid header value: {:?}", e)))?,
+            );
+        } else {
+            return Err(JsValue::from_str("Header key and value must be strings"));
+        }
+    }
+
+    Ok(headers)
 }
 
 #[cfg(test)]
@@ -555,5 +588,32 @@ mod tests {
             .verify_cardano_transaction_proof_then_compute_message(&tx_proof, certificate)
             .await
             .expect("Compute tx proof message for matching cert failed");
+    }
+
+    #[wasm_bindgen_test]
+    fn test_process_additional_headers() {
+        let mut headers_map = Map::new();
+        headers_map.set(
+            &JsValue::from_str("Custom-Header-1"),
+            &JsValue::from_str("Value1"),
+        );
+        headers_map.set(
+            &JsValue::from_str("Custom-Header-2"),
+            &JsValue::from_str("Value2"),
+        );
+
+        let result = process_additional_headers(&headers_map);
+        assert!(result.is_ok());
+
+        let headers = result.unwrap();
+
+        assert_eq!(
+            headers.get("Custom-Header-1").unwrap(),
+            &HeaderValue::from_str("Value1").unwrap()
+        );
+        assert_eq!(
+            headers.get("Custom-Header-2").unwrap(),
+            &HeaderValue::from_str("Value2").unwrap()
+        );
     }
 }

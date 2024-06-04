@@ -1,5 +1,6 @@
 use anyhow::{anyhow, Context};
 use mithril_common::api_version::APIVersionProvider;
+use reqwest::header::HeaderMap;
 use reqwest::Url;
 use slog::{o, Logger};
 use std::sync::Arc;
@@ -62,6 +63,7 @@ pub struct ClientBuilder {
     snapshot_downloader: Option<Arc<dyn SnapshotDownloader>>,
     logger: Option<Logger>,
     feedback_receivers: Vec<Arc<dyn FeedbackReceiver>>,
+    additional_headers: Option<HeaderMap>,
 }
 
 impl ClientBuilder {
@@ -77,6 +79,7 @@ impl ClientBuilder {
             snapshot_downloader: None,
             logger: None,
             feedback_receivers: vec![],
+            additional_headers: None,
         }
     }
 
@@ -94,6 +97,7 @@ impl ClientBuilder {
             snapshot_downloader: None,
             logger: None,
             feedback_receivers: vec![],
+            additional_headers: None,
         }
     }
 
@@ -123,6 +127,7 @@ impl ClientBuilder {
                         APIVersionProvider::compute_all_versions_sorted()
                             .with_context(|| "Could not compute aggregator api versions")?,
                         logger.clone(),
+                        self.additional_headers,
                     )
                     .with_context(|| "Building aggregator client failed")?,
                 )
@@ -223,6 +228,12 @@ impl ClientBuilder {
     /// validation).
     pub fn add_feedback_receiver(mut self, receiver: Arc<dyn FeedbackReceiver>) -> Self {
         self.feedback_receivers.push(receiver);
+        self
+    }
+
+    /// Set additional headers for the HTTP client.
+    pub fn with_additional_headers(mut self, headers: reqwest::header::HeaderMap) -> Self {
+        self.additional_headers = Some(headers);
         self
     }
 }

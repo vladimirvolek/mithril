@@ -10,7 +10,7 @@
 use anyhow::{anyhow, Context};
 use async_recursion::async_recursion;
 use async_trait::async_trait;
-use reqwest::{Response, StatusCode, Url};
+use reqwest::{header::HeaderMap, Response, StatusCode, Url};
 use semver::Version;
 use slog::{debug, Logger};
 use std::sync::Arc;
@@ -167,6 +167,7 @@ pub struct AggregatorHTTPClient {
     aggregator_endpoint: Url,
     api_versions: Arc<RwLock<Vec<Version>>>,
     logger: Logger,
+    additional_headers: Option<HeaderMap>,
 }
 
 impl AggregatorHTTPClient {
@@ -175,6 +176,7 @@ impl AggregatorHTTPClient {
         aggregator_endpoint: Url,
         api_versions: Vec<Version>,
         logger: Logger,
+        additional_headers: Option<HeaderMap>,
     ) -> MithrilResult<Self> {
         let http_client = reqwest::ClientBuilder::new()
             .build()
@@ -196,6 +198,7 @@ impl AggregatorHTTPClient {
             aggregator_endpoint,
             api_versions: Arc::new(RwLock::new(api_versions)),
             logger,
+            additional_headers,
         })
     }
 
@@ -238,8 +241,15 @@ impl AggregatorHTTPClient {
             self.logger,
             "Prepare request with version: {current_api_version}"
         );
-        let request_builder =
+        let mut request_builder =
             request_builder.header(MITHRIL_API_VERSION_HEADER, current_api_version);
+
+        if let Some(headers) = &self.additional_headers {
+            for (key, value) in headers {
+                request_builder = request_builder.header(key, value);
+            }
+        }
+
         let response = request_builder.send().await.map_err(|e| {
             AggregatorClientError::SubsystemError(anyhow!(e).context(format!(
                 "Cannot perform a GET against the Aggregator HTTP server (url='{url}')"
@@ -280,8 +290,14 @@ impl AggregatorHTTPClient {
             self.logger,
             "Prepare request with version: {current_api_version}"
         );
-        let request_builder =
+        let mut request_builder =
             request_builder.header(MITHRIL_API_VERSION_HEADER, current_api_version);
+
+        if let Some(headers) = &self.additional_headers {
+            for (key, value) in headers {
+                request_builder = request_builder.header(key, value);
+            }
+        }
 
         let response = request_builder.send().await.map_err(|e| {
             AggregatorClientError::SubsystemError(
@@ -335,6 +351,12 @@ impl AggregatorHTTPClient {
                 )
             })
             .map_err(AggregatorClientError::SubsystemError)
+    }
+
+    /// Set additional headers to the requests
+    pub fn with_additional_headers(mut self, headers: HeaderMap) -> Self {
+        self.additional_headers = Some(headers);
+        self
     }
 }
 
@@ -394,8 +416,9 @@ mod tests {
             ),
         ] {
             let url = Url::parse(url).unwrap();
-            let client = AggregatorHTTPClient::new(url, vec![], crate::test_utils::test_logger())
-                .expect("building aggregator http client should not fail");
+            let client =
+                AggregatorHTTPClient::new(url, vec![], crate::test_utils::test_logger(), None)
+                    .expect("building aggregator http client should not fail");
 
             assert_eq!(expected, client.aggregator_endpoint.as_str());
         }
