@@ -1,3 +1,4 @@
+use crate::client_wasm::js_sys::Map;
 use crate::WasmResult;
 use async_trait::async_trait;
 use http::{HeaderMap, HeaderName, HeaderValue};
