@@ -308,25 +308,32 @@ impl MithrilUnstableClient {
     }
 }
 
-fn process_additional_headers(headers_map: &js_sys::Map) -> Result<HeaderMap, JsValue> {
+fn process_additional_headers(headers_map: &JsValue) -> Result<HeaderMap, JsValue> {
     let mut headers = HeaderMap::new();
     for entry in js_sys::try_iter(headers_map)
         .map_err(|e| JsValue::from_str(&format!("Failed to iterate headers: {:?}", e)))?
     {
-        let (key, value) = entry?
-            .into_tuple()
-            .ok_or_else(|| JsValue::from_str("Invalid header entry"))?;
-
-        if let (Some(key), Some(value)) = (key.as_string(), value.as_string()) {
-            headers.insert(
-                HeaderName::from_bytes(key.as_bytes())
-                    .map_err(|e| JsValue::from_str(&format!("Invalid header name: {:?}", e)))?,
-                HeaderValue::from_str(&value)
-                    .map_err(|e| JsValue::from_str(&format!("Invalid header value: {:?}", e)))?,
-            );
-        } else {
-            return Err(JsValue::from_str("Header key and value must be strings"));
+        let entry = entry?;
+        let tuple = js_sys::Array::from(&entry);
+        if tuple.length() != 2 {
+            return Err(JsValue::from_str("Invalid header entry"));
         }
+
+        let key = tuple
+            .get(0)
+            .as_string()
+            .ok_or_else(|| JsValue::from_str("Header key must be a string"))?;
+        let value = tuple
+            .get(1)
+            .as_string()
+            .ok_or_else(|| JsValue::from_str("Header value must be a string"))?;
+
+        headers.insert(
+            HeaderName::from_bytes(key.as_bytes())
+                .map_err(|e| JsValue::from_str(&format!("Invalid header name: {:?}", e)))?,
+            HeaderValue::from_str(&value)
+                .map_err(|e| JsValue::from_str(&format!("Invalid header value: {:?}", e)))?,
+        );
     }
 
     Ok(headers)
