@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use http::header::{HeaderMap, HeaderName, HeaderValue};
 use serde::Serialize;
 use std::sync::Arc;
 use wasm_bindgen::prelude::*;
