@@ -73,7 +73,7 @@ impl MithrilClient {
     pub fn new(
         aggregator_endpoint: &str,
         genesis_verification_key: &str,
-        additional_headers: Option<JsValue>,
+        additional_headers: JsValue,
     ) -> MithrilClient {
         let feedback_receiver = Arc::new(JSBroadcastChannelFeedbackReceiver::new("mithril-client"));
 
@@ -81,7 +81,10 @@ impl MithrilClient {
             .add_feedback_receiver(feedback_receiver);
 
         // Add additional headers if they are provided
-        if let Some(headers_map) = additional_headers {
+        if !additional_headers.is_undefined() {
+            let headers_map: Map = additional_headers
+                .into_serde()
+                .map_err(|err| JsValue::from_str(&format!("Invalid headers: {:?}", err)))?;
             let headers = process_additional_headers(&headers_map)?;
             builder = builder.with_additional_headers(headers);
         }
@@ -306,6 +309,7 @@ impl MithrilUnstableClient {
         Ok(serde_wasm_bindgen::to_value(&result)?)
     }
 }
+
 fn process_additional_headers(headers_map: &js_sys::Map) -> Result<HeaderMap, JsValue> {
     let mut headers = HeaderMap::new();
     for entry in js_sys::try_iter(headers_map)
