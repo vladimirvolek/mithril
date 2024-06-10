@@ -1,3 +1,4 @@
+use crate::WasmResult;
 use async_trait::async_trait;
 use http::{HeaderMap, HeaderName, HeaderValue};
 use mithril_client::{
@@ -8,8 +9,6 @@ use serde::Serialize;
 use std::sync::Arc;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::js_sys;
-
-use crate::WasmResult;
 
 #[wasm_bindgen]
 struct JSBroadcastChannelFeedbackReceiver {
@@ -74,7 +73,7 @@ impl MithrilClient {
     pub fn new(
         aggregator_endpoint: &str,
         genesis_verification_key: &str,
-        additional_headers: Option<js_sys::Map>,
+        additional_headers: Option<JsValue>,
     ) -> MithrilClient {
         let feedback_receiver = Arc::new(JSBroadcastChannelFeedbackReceiver::new("mithril-client"));
 
@@ -83,7 +82,7 @@ impl MithrilClient {
 
         // Add additional headers if they are provided
         if let Some(headers_map) = additional_headers {
-            let headers = process_additional_headers(headers_map);
+            let headers = process_additional_headers(&headers_map)?;
             builder = builder.with_additional_headers(headers);
         }
 
@@ -307,8 +306,7 @@ impl MithrilUnstableClient {
         Ok(serde_wasm_bindgen::to_value(&result)?)
     }
 }
-
-fn process_additional_headers(headers_map: &JsValue) -> Result<HeaderMap, JsValue> {
+fn process_additional_headers(headers_map: &js_sys::Map) -> Result<HeaderMap, JsValue> {
     let mut headers = HeaderMap::new();
     for entry in js_sys::try_iter(headers_map)
         .map_err(|e| JsValue::from_str(&format!("Failed to iterate headers: {:?}", e)))?
