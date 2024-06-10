@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use reqwest::header::HeaderMap;
 use serde::Serialize;
 use std::sync::Arc;
 use wasm_bindgen::prelude::*;
@@ -70,7 +71,11 @@ pub struct MithrilUnstableClient {
 impl MithrilClient {
     /// Constructor for wasm client
     #[wasm_bindgen(constructor)]
-    pub fn new(aggregator_endpoint: &str, genesis_verification_key: &str) -> MithrilClient {
+    pub fn new(
+        aggregator_endpoint: &str,
+        genesis_verification_key: &str,
+        additional_headers: js_sys::Map,
+    ) -> MithrilClient {
         let feedback_receiver = Arc::new(JSBroadcastChannelFeedbackReceiver::new("mithril-client"));
 
         let mut builder = ClientBuilder::aggregator(aggregator_endpoint, genesis_verification_key)
