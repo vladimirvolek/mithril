@@ -1,8 +1,8 @@
 use async_trait::async_trait;
-use reqwest::header::HeaderMap;
 use serde::Serialize;
 use std::sync::Arc;
 use wasm_bindgen::prelude::*;
+use wasm_bindgen_futures::js_sys;
 
 use mithril_client::{
     feedback::{FeedbackReceiver, MithrilEvent},
