@@ -1,13 +1,13 @@
 use async_trait::async_trait;
-use serde::Serialize;
-use std::sync::Arc;
-use wasm_bindgen::prelude::*;
-use wasm_bindgen_futures::js_sys;
-
+use http::HeaderMap;
 use mithril_client::{
     feedback::{FeedbackReceiver, MithrilEvent},
     CardanoTransactionsProofs, Client, ClientBuilder, MessageBuilder, MithrilCertificate,
 };
+use serde::Serialize;
+use std::sync::Arc;
+use wasm_bindgen::prelude::*;
+use wasm_bindgen_futures::js_sys;
 
 use crate::WasmResult;
 
