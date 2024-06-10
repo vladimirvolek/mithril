@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use http::HeaderMap;
+use http::{HeaderMap, HeaderName};
 use mithril_client::{
     feedback::{FeedbackReceiver, MithrilEvent},
     CardanoTransactionsProofs, Client, ClientBuilder, MessageBuilder, MithrilCertificate,
