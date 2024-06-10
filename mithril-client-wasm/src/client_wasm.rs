@@ -300,7 +300,6 @@ fn process_additional_headers(headers_map: &js_sys::Map) -> Result<HeaderMap, Js
     for entry in js_sys::try_iter(headers_map)
         .map_err(|e| JsValue::from_str(&format!("Failed to iterate headers: {:?}", e)))?
     {
-        let entry = entry?;
         let tuple = js_sys::Array::from(&entry);
         if tuple.length() != 2 {
             return Err(JsValue::from_str("Invalid header entry"));
