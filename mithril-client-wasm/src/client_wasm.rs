@@ -1,5 +1,4 @@
 use async_trait::async_trait;
-use http::header::{HeaderMap, HeaderName, HeaderValue};
 use serde::Serialize;
 use std::sync::Arc;
 use wasm_bindgen::prelude::*;
@@ -75,7 +74,7 @@ impl MithrilClient {
     pub fn new(
         aggregator_endpoint: &str,
         genesis_verification_key: &str,
-        additional_headers: js_sys::Map,
+        additional_headers: Option<js_sys::Map>,
     ) -> MithrilClient {
         let feedback_receiver = Arc::new(JSBroadcastChannelFeedbackReceiver::new("mithril-client"));
 
