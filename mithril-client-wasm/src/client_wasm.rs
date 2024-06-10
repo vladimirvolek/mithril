@@ -1,15 +1,14 @@
-use crate::client_wasm::js_sys::Map;
-use crate::WasmResult;
 use async_trait::async_trait;
-use http::{HeaderMap, HeaderName, HeaderValue};
+use serde::Serialize;
+use std::sync::Arc;
+use wasm_bindgen::prelude::*;
+
 use mithril_client::{
     feedback::{FeedbackReceiver, MithrilEvent},
     CardanoTransactionsProofs, Client, ClientBuilder, MessageBuilder, MithrilCertificate,
 };
-use serde::Serialize;
-use std::sync::Arc;
-use wasm_bindgen::prelude::*;
-use wasm_bindgen_futures::js_sys;
+
+use crate::WasmResult;
 
 #[wasm_bindgen]
 struct JSBroadcastChannelFeedbackReceiver {
@@ -69,32 +68,15 @@ pub struct MithrilUnstableClient {
 
 #[wasm_bindgen]
 impl MithrilClient {
-    /// Constructor for wasm client
     #[wasm_bindgen(constructor)]
-    pub fn new(
-        aggregator_endpoint: &str,
-        genesis_verification_key: &str,
-        additional_headers: JsValue,
-    ) -> MithrilClient {
+    pub fn new(aggregator_endpoint: &str, genesis_verification_key: &str) -> MithrilClient {
         let feedback_receiver = Arc::new(JSBroadcastChannelFeedbackReceiver::new("mithril-client"));
-
-        let mut builder = ClientBuilder::aggregator(aggregator_endpoint, genesis_verification_key)
-            .add_feedback_receiver(feedback_receiver);
-
-        // Add additional headers if they are provided
-        if !additional_headers.is_undefined() {
-            let headers_map: Map = additional_headers
-                .into_serde()
-                .map_err(|err| JsValue::from_str(&format!("Invalid headers: {:?}", err)))?;
-            let headers = process_additional_headers(&headers_map)?;
-            builder = builder.with_additional_headers(headers);
-        }
-
-        let client = builder
+        let client = ClientBuilder::aggregator(aggregator_endpoint, genesis_verification_key)
+            .add_feedback_receiver(feedback_receiver)
             .build()
-            .map_err(|err| JsValue::from_str(&format!("{:?}", err)))?;
+            .map_err(|err| format!("{err:?}"))
+            .unwrap();
         let unstable = MithrilUnstableClient::new(client.clone());
-
         MithrilClient { client, unstable }
     }
 
