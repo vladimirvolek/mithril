@@ -2,6 +2,7 @@ use async_trait::async_trait;
 use http::{HeaderMap, HeaderName, HeaderValue};
 use serde::Serialize;
 use std::sync::Arc;
+use std::sync::Mutex;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::js_sys;
 
