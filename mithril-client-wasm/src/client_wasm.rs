@@ -91,10 +91,11 @@ impl MithrilClient {
     pub fn set_additional_headers(&self, headers: js_sys::Map) -> Result<(), JsValue> {
         let headers = process_additional_headers(&headers)?;
         let mut lock = self
+            .client
             .additional_headers
             .lock()
-            .map_err(|err| format!("{err:?}"))?
-            * lock = headers;
+            .map_err(|err| JsValue::from_str(&format!("{err:?}")))?;
+        *lock = headers;
         Ok(())
     }
 
@@ -313,9 +314,11 @@ impl MithrilUnstableClient {
 
 fn process_additional_headers(headers_map: &js_sys::Map) -> Result<HeaderMap, JsValue> {
     let mut headers = HeaderMap::new();
-    for entry in js_sys::try_iter(headers_map)
-        .map_err(|e| JsValue::from_str(&format!("Failed to iterate headers: {:?}", e)))?
-    {
+    let iterator = js_sys::try_iter(headers_map)?
+        .ok_or_else(|| JsValue::from_str("Failed to create iterator from headers map"))?;
+
+    for entry in iterator {
+        let entry = entry?;
         let tuple = js_sys::Array::from(&entry);
         if tuple.length() != 2 {
             return Err(JsValue::from_str("Invalid header entry"));
