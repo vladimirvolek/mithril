@@ -355,8 +355,8 @@ impl AggregatorHTTPClient {
     }
 
     /// Set additional headers to the requests
-    pub fn with_additional_headers(mut self, headers: HeaderMap) -> Self {
-        self.additional_headers = Arc::new(Mutex::new(headers));
+    pub fn with_additional_headers(mut self, headers: Arc<Mutex<HeaderMap>>) -> Self {
+        self.additional_headers = Some(headers);
         self
     }
 }
