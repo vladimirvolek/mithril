@@ -15,7 +15,7 @@ use semver::Version;
 use slog::{debug, Logger};
 use std::sync::Arc;
 use thiserror::Error;
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex, RwLock};
 
 #[cfg(test)]
 use mockall::automock;
@@ -167,7 +167,7 @@ pub struct AggregatorHTTPClient {
     aggregator_endpoint: Url,
     api_versions: Arc<RwLock<Vec<Version>>>,
     logger: Logger,
-    additional_headers: Arc<RwLock<HeaderMap>>,
+    additional_headers: Arc<Mutex<HeaderMap>>,
 }
 
 impl AggregatorHTTPClient {
