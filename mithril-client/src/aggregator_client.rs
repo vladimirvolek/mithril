@@ -193,14 +193,14 @@ impl AggregatorHTTPClient {
             url
         };
 
+        let additional_headers = Arc::new(Mutex::new(additional_headers.unwrap_or_default()));
+
         Ok(Self {
             http_client,
             aggregator_endpoint,
             api_versions: Arc::new(RwLock::new(api_versions)),
             logger,
-            additional_headers: Arc::new(Mutex::new(
-                additional_headers.unwrap_or_else(HeaderMap::new),
-            )),
+            additional_headers,
         })
     }
 
@@ -209,7 +209,7 @@ impl AggregatorHTTPClient {
         self.api_versions.read().await.first().cloned()
     }
 
-    /// Discards the current api version
+    /// Discards the curr    ent api version
     /// It discards the current version if and only if there is at least 2 versions available
     async fn discard_current_api_version(&self) -> Option<Version> {
         if self.api_versions.read().await.len() < 2 {
@@ -356,7 +356,7 @@ impl AggregatorHTTPClient {
 
     /// Set additional headers to the requests
     pub fn with_additional_headers(mut self, headers: Arc<Mutex<HeaderMap>>) -> Self {
-        self.additional_headers = Some(headers);
+        self.additional_headers = headers;
         self
     }
 }
