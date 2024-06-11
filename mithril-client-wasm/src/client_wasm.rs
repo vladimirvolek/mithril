@@ -73,13 +73,28 @@ impl MithrilClient {
     #[wasm_bindgen(constructor)]
     pub fn new(aggregator_endpoint: &str, genesis_verification_key: &str) -> MithrilClient {
         let feedback_receiver = Arc::new(JSBroadcastChannelFeedbackReceiver::new("mithril-client"));
+        let additional_headers = Arc::new(Mutex::new(HeaderMap::new()));
+
         let client = ClientBuilder::aggregator(aggregator_endpoint, genesis_verification_key)
             .add_feedback_receiver(feedback_receiver)
+            .with_additional_headers(additional_headers.clone())
             .build()
             .map_err(|err| format!("{err:?}"))
             .unwrap();
         let unstable = MithrilUnstableClient::new(client.clone());
         MithrilClient { client, unstable }
+    }
+
+    /// Set additional headers to be sent with each request
+    #[wasm_bindgen]
+    pub fn set_additional_headers(&self, headers: js_sys::Map) -> Result<(), JsValue> {
+        let headers = process_additional_headers(&headers)?;
+        let mut lock = self
+            .additional_headers
+            .lock()
+            .map_err(|err| format!("{err:?}"))?
+            * lock = headers;
+        Ok(())
     }
 
     /// Call the client to get a snapshot from a digest
@@ -590,7 +605,8 @@ mod tests {
 
     #[wasm_bindgen_test]
     fn test_process_additional_headers() {
-        let mut headers_map = Map::new();
+        let headers_map = Map::new();
+
         headers_map.set(
             &JsValue::from_str("Custom-Header-1"),
             &JsValue::from_str("Value1"),
@@ -601,6 +617,7 @@ mod tests {
         );
 
         let result = process_additional_headers(&headers_map);
+
         assert!(result.is_ok());
 
         let headers = result.unwrap();
