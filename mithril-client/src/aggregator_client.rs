@@ -198,7 +198,7 @@ impl AggregatorHTTPClient {
             aggregator_endpoint,
             api_versions: Arc::new(RwLock::new(api_versions)),
             logger,
-            additional_headers: Arc::new(RwLock::new(
+            additional_headers: Arc::new(Mutex::new(
                 additional_headers.unwrap_or_else(HeaderMap::new),
             )),
         })
@@ -246,7 +246,7 @@ impl AggregatorHTTPClient {
         let mut request_builder =
             request_builder.header(MITHRIL_API_VERSION_HEADER, current_api_version);
 
-        let headers = self.additional_headers.read().await;
+        let headers = self.additional_headers.lock().await;
 
         for (key, value) in headers.iter() {
             request_builder = request_builder.header(key, value);
@@ -295,7 +295,7 @@ impl AggregatorHTTPClient {
         let mut request_builder =
             request_builder.header(MITHRIL_API_VERSION_HEADER, current_api_version);
 
-        let headers = self.additional_headers.read().await;
+        let headers = self.additional_headers.lock().await;
         for (key, value) in headers.iter() {
             request_builder = request_builder.header(key, value);
         }
@@ -356,7 +356,7 @@ impl AggregatorHTTPClient {
 
     /// Set additional headers to the requests
     pub fn with_additional_headers(mut self, headers: HeaderMap) -> Self {
-        self.additional_headers = Arc::new(RwLock::new(headers));
+        self.additional_headers = Arc::new(Mutex::new(headers));
         self
     }
 }
