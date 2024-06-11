@@ -344,6 +344,7 @@ fn process_additional_headers(headers_map: &js_sys::Map) -> Result<HeaderMap, Js
 mod tests {
     use super::*;
     use crate::test_data;
+    use js_sys::Map;
     use wasm_bindgen_test::*;
 
     use mithril_client::{
