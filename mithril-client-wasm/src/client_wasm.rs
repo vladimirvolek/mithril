@@ -1,8 +1,8 @@
 use async_trait::async_trait;
 use http::{HeaderMap, HeaderName, HeaderValue};
 use serde::Serialize;
-use tokio::sync::Arc;
-use tokio::sync::Mutex;
+use std::sync::Arc;
+use std::sync::Mutex;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::js_sys;
 
@@ -75,7 +75,7 @@ impl MithrilClient {
     #[wasm_bindgen(constructor)]
     pub fn new(aggregator_endpoint: &str, genesis_verification_key: &str) -> MithrilClient {
         let feedback_receiver = Arc::new(JSBroadcastChannelFeedbackReceiver::new("mithril-client"));
-        let additional_headers = Arc::new(tokio::sync::Mutex::new(HeaderMap::new()));
+        let additional_headers = Arc::new(std::sync::Mutex::new(HeaderMap::new()));
 
         let client = ClientBuilder::aggregator(aggregator_endpoint, genesis_verification_key)
             .add_feedback_receiver(feedback_receiver)
