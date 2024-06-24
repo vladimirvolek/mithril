@@ -167,7 +167,7 @@ pub struct AggregatorHTTPClient {
     aggregator_endpoint: Url,
     api_versions: Arc<RwLock<Vec<Version>>>,
     logger: Logger,
-    additional_headers: Arc<Mutex<HeaderMap>>,
+    additional_headers: Option<HeaderMap>,
 }
 
 impl AggregatorHTTPClient {
@@ -197,7 +197,7 @@ impl AggregatorHTTPClient {
             aggregator_endpoint,
             api_versions: Arc::new(RwLock::new(api_versions)),
             logger,
-            additional_headers: Arc::new(Mutex::new(HeaderMap::new())),
+            additional_headers: None,
         })
     }
 
@@ -243,10 +243,10 @@ impl AggregatorHTTPClient {
         let mut request_builder =
             request_builder.header(MITHRIL_API_VERSION_HEADER, current_api_version);
 
-        let headers = self.additional_headers.lock().await;
-
-        for (key, value) in headers.iter() {
-            request_builder = request_builder.header(key, value);
+        if let Some(additional_headers) = &self.additional_headers {
+            for (key, value) in additional_headers.iter() {
+                request_builder = request_builder.header(key, value);
+            }
         }
 
         let response = request_builder.send().await.map_err(|e| {
@@ -292,9 +292,10 @@ impl AggregatorHTTPClient {
         let mut request_builder =
             request_builder.header(MITHRIL_API_VERSION_HEADER, current_api_version);
 
-        let headers = self.additional_headers.lock().await;
-        for (key, value) in headers.iter() {
-            request_builder = request_builder.header(key, value);
+        if let Some(additional_headers) = &self.additional_headers {
+            for (key, value) in additional_headers.iter() {
+                request_builder = request_builder.header(key, value);
+            }
         }
 
         let response = request_builder.send().await.map_err(|e| {
@@ -352,8 +353,8 @@ impl AggregatorHTTPClient {
     }
 
     /// Set additional headers to the requests
-    pub fn with_additional_headers(mut self, headers: Arc<Mutex<HeaderMap>>) -> Self {
-        self.additional_headers = headers;
+    pub fn with_additional_headers(mut self, headers: HeaderMap) -> Self {
+        self.additional_headers = Some(headers);
         self
     }
 }
