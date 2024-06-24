@@ -127,7 +127,6 @@ impl ClientBuilder {
                         APIVersionProvider::compute_all_versions_sorted()
                             .with_context(|| "Could not compute aggregator api versions")?,
                         logger.clone(),
-                        self.additional_headers,
                     )
                     .with_context(|| "Building aggregator client failed")?,
                 )

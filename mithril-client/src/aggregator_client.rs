@@ -176,7 +176,6 @@ impl AggregatorHTTPClient {
         aggregator_endpoint: Url,
         api_versions: Vec<Version>,
         logger: Logger,
-        additional_headers: Option<HeaderMap>,
     ) -> MithrilResult<Self> {
         let http_client = reqwest::ClientBuilder::new()
             .build()
@@ -193,14 +192,12 @@ impl AggregatorHTTPClient {
             url
         };
 
-        let additional_headers = Arc::new(Mutex::new(additional_headers.unwrap_or_default()));
-
         Ok(Self {
             http_client,
             aggregator_endpoint,
             api_versions: Arc::new(RwLock::new(api_versions)),
             logger,
-            additional_headers,
+            additional_headers: Arc::new(Mutex::new(HeaderMap::new())),
         })
     }
 
@@ -417,9 +414,8 @@ mod tests {
             ),
         ] {
             let url = Url::parse(url).unwrap();
-            let client =
-                AggregatorHTTPClient::new(url, vec![], crate::test_utils::test_logger(), None)
-                    .expect("building aggregator http client should not fail");
+            let client = AggregatorHTTPClient::new(url, vec![], crate::test_utils::test_logger())
+                .expect("building aggregator http client should not fail");
 
             assert_eq!(expected, client.aggregator_endpoint.as_str());
         }
