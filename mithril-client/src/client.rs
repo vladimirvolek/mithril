@@ -4,6 +4,8 @@ use reqwest::header::HeaderMap;
 use reqwest::Url;
 use slog::{o, Logger};
 use std::sync::Arc;
+use tar::Header;
+use tokio::sync::Mutex;
 
 use crate::aggregator_client::{AggregatorClient, AggregatorHTTPClient};
 #[cfg(feature = "unstable")]
@@ -63,7 +65,7 @@ pub struct ClientBuilder {
     snapshot_downloader: Option<Arc<dyn SnapshotDownloader>>,
     logger: Option<Logger>,
     feedback_receivers: Vec<Arc<dyn FeedbackReceiver>>,
-    additional_headers: Option<HeaderMap>,
+    additional_headers: Arc<Mutex<HeaderMap>>,
 }
 
 impl ClientBuilder {
@@ -79,7 +81,7 @@ impl ClientBuilder {
             snapshot_downloader: None,
             logger: None,
             feedback_receivers: vec![],
-            additional_headers: None,
+            additional_headers: Arc::new(Mutex::new(HeaderMap::new())),
         }
     }
 
@@ -97,7 +99,7 @@ impl ClientBuilder {
             snapshot_downloader: None,
             logger: None,
             feedback_receivers: vec![],
-            additional_headers: None,
+            additional_headers: Arc::new(Mutex::new(HeaderMap::new())),
         }
     }
 
@@ -231,8 +233,8 @@ impl ClientBuilder {
     }
 
     /// Set additional headers for the HTTP client.
-    pub fn with_additional_headers(mut self, headers: reqwest::header::HeaderMap) -> Self {
-        self.additional_headers = Some(headers);
+    pub fn with_additional_headers(mut self, headers: Arc<Mutex<HeaderMap>>) -> Self {
+        self.additional_headers = headers;
         self
     }
 }
