@@ -75,7 +75,7 @@ impl MithrilClient {
     #[wasm_bindgen(constructor)]
     pub fn new(aggregator_endpoint: &str, genesis_verification_key: &str) -> MithrilClient {
         let feedback_receiver = Arc::new(JSBroadcastChannelFeedbackReceiver::new("mithril-client"));
-        let additional_headers = Arc::new(std::sync::Mutex::new(HeaderMap::new()));
+        let additional_headers = Arc::new(Mutex::new(HeaderMap::new()));
 
         let client = ClientBuilder::aggregator(aggregator_endpoint, genesis_verification_key)
             .add_feedback_receiver(feedback_receiver)
