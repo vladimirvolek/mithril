@@ -84,7 +84,11 @@ impl MithrilClient {
             .map_err(|err| format!("{err:?}"))
             .unwrap();
         let unstable = MithrilUnstableClient::new(client.clone());
-        MithrilClient { client, unstable }
+        MithrilClient {
+            client,
+            unstable,
+            additional_headers,
+        }
     }
 
     /// Set additional headers to be sent with each request
