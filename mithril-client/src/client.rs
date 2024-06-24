@@ -4,7 +4,6 @@ use reqwest::header::HeaderMap;
 use reqwest::Url;
 use slog::{o, Logger};
 use std::sync::Arc;
-use tar::Header;
 use tokio::sync::Mutex;
 
 use crate::aggregator_client::{AggregatorClient, AggregatorHTTPClient};
