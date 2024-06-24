@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use http::{HeaderMap, HeaderName, HeaderValue};
 use serde::Serialize;
-use std::sync::Arc;
+use tokio::sync::Arc;
 use tokio::sync::Mutex;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::js_sys;
