@@ -89,12 +89,14 @@ impl MithrilClient {
     /// Set additional headers to be sent with each request
     #[wasm_bindgen]
     pub fn set_additional_headers(&self, headers: js_sys::Map) -> Result<(), JsValue> {
-        let headers = process_additional_headers(&headers)?;
+        let headers = process_additional_headers(&headers)
+            .map_err(|e| JsValue::from_str(&format!("Error processing headers: {e}")))?;
+
         let mut lock = self
-            .client
             .additional_headers
             .lock()
-            .map_err(|err| JsValue::from_str(&format!("{err:?}")))?;
+            .map_err(|e| JsValue::from_str(&format!("Mutex lock failed: {e}")))?;
+
         *lock = headers;
         Ok(())
     }
