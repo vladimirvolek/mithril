@@ -15,7 +15,7 @@ use semver::Version;
 use slog::{debug, Logger};
 use std::sync::Arc;
 use thiserror::Error;
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::RwLock;
 
 #[cfg(test)]
 use mockall::automock;

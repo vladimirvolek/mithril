@@ -83,6 +83,7 @@ impl MithrilClient {
             .map_err(|err| format!("{err:?}"))
             .unwrap();
         let unstable = MithrilUnstableClient::new(client.clone());
+
         MithrilClient {
             client,
             unstable,
