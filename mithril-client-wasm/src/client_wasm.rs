@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use http::{HeaderMap, HeaderName, HeaderValue};
 use serde::Serialize;
 use std::sync::Arc;
-use std::sync::Mutex;
+use tokio::sync::Mutex;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::js_sys;
 
@@ -58,6 +58,7 @@ impl From<MithrilEvent> for MithrilEventWasm {
 #[wasm_bindgen(getter_with_clone)]
 pub struct MithrilClient {
     client: Client,
+    additional_headers: Arc<Mutex<HeaderMap>>,
 
     /// Unstable functions
     pub unstable: MithrilUnstableClient,
@@ -74,7 +75,7 @@ impl MithrilClient {
     #[wasm_bindgen(constructor)]
     pub fn new(aggregator_endpoint: &str, genesis_verification_key: &str) -> MithrilClient {
         let feedback_receiver = Arc::new(JSBroadcastChannelFeedbackReceiver::new("mithril-client"));
-        let additional_headers = Arc::new(Mutex::new(HeaderMap::new()));
+        let additional_headers = Arc::new(tokio::sync::Mutex::new(HeaderMap::new()));
 
         let client = ClientBuilder::aggregator(aggregator_endpoint, genesis_verification_key)
             .add_feedback_receiver(feedback_receiver)
@@ -90,7 +91,7 @@ impl MithrilClient {
     #[wasm_bindgen]
     pub fn set_additional_headers(&self, headers: js_sys::Map) -> Result<(), JsValue> {
         let headers = process_additional_headers(&headers)
-            .map_err(|e| JsValue::from_str(&format!("Error processing headers: {e}")))?;
+            .map_err(|e| JsValue::from_str(&format!("Error processing headers: {:?}", e)))?;
 
         let mut lock = self
             .additional_headers
