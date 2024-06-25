@@ -191,10 +191,9 @@ impl CertificatesHashMigrator {
 #[cfg(test)]
 mod test {
     use mithril_common::entities::{
-        ChainPoint, ImmutableFileNumber, SignedEntityType, SignedEntityTypeDiscriminants as Type,
-        TimePoint,
+        Epoch, ImmutableFileNumber, SignedEntityConfig, SignedEntityType,
+        SignedEntityTypeDiscriminants as Type, TimePoint,
     };
-    use mithril_common::test_utils::fake_data;
     use mithril_persistence::sqlite::{ConnectionBuilder, ConnectionOptions, SqliteConnection};
 
     use crate::database::record::{CertificateRecord, SignedEntityRecord};
@@ -221,7 +220,11 @@ mod test {
     /// Note: If we want to create CardanoTransaction test certificate then another method
     /// that take a ChainPoint as parameter should be created.
     fn time_at(epoch: u64, immutable_file_number: ImmutableFileNumber) -> TimePoint {
-        TimePoint::new(epoch, immutable_file_number, ChainPoint::dummy())
+        TimePoint {
+            epoch: Epoch(epoch),
+            immutable_file_number,
+            ..TimePoint::dummy()
+        }
     }
 
     fn dummy_genesis(certificate_hash: &str, time_point: TimePoint) -> Certificate {
@@ -245,11 +248,8 @@ mod test {
             previous_hash,
             time_point.epoch,
             time_point.immutable_file_number,
-            SignedEntityType::from_time_point(
-                &signed_entity_type,
-                &fake_data::network().to_string(),
-                &time_point,
-            ),
+            SignedEntityConfig::dummy()
+                .time_point_to_signed_entity(signed_entity_type, &time_point),
         );
 
         certificate.into()
@@ -272,11 +272,8 @@ mod test {
                     SignedEntityType::CardanoImmutableFilesFull(beacon) => {
                         format!("snapshot-{}-{}", beacon.epoch, beacon.immutable_file_number)
                     }
-                    SignedEntityType::CardanoTransactions(beacon) => {
-                        format!(
-                            "cardano-transactions-{}-{}",
-                            beacon.epoch, beacon.immutable_file_number
-                        )
+                    SignedEntityType::CardanoTransactions(epoch, block_number) => {
+                        format!("cardano-transactions-{epoch}-{block_number}",)
                     }
                 };
 

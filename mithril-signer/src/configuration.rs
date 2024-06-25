@@ -40,6 +40,10 @@ pub struct Configuration {
     /// be considered final, preventing any further rollback `[default: 2160]`.
     pub network_security_parameter: BlockNumber,
 
+    /// Blocks offset, from the tip of the chain, to exclude during the cardano transactions preload
+    /// `[default: 3000]`.
+    pub preload_security_parameter: BlockNumber,
+
     /// Aggregator endpoint
     #[example = "`https://aggregator.pre-release-preview.api.mithril.network/aggregator`"]
     pub aggregator_endpoint: String,
@@ -104,6 +108,11 @@ pub struct Configuration {
     /// [network_security_parameter][Self::network_security_parameter] blocks after each import
     /// `[default: true]`.
     pub enable_transaction_pruning: bool,
+
+    /// Chunk size for importing transactions, combined with transaction pruning it reduces the
+    /// storage footprint of the signer by reducing the number of transactions stored on disk
+    /// at any given time.
+    pub transactions_import_block_chunk_size: BlockNumber,
 }
 
 impl Configuration {
@@ -121,6 +130,7 @@ impl Configuration {
             network: "devnet".to_string(),
             network_magic: Some(42),
             network_security_parameter: 2160,
+            preload_security_parameter: 30,
             party_id: Some(party_id),
             run_interval: 5000,
             data_stores_directory: PathBuf::new(),
@@ -138,6 +148,7 @@ impl Configuration {
             metrics_server_port: 9090,
             allow_unparsable_block: false,
             enable_transaction_pruning: false,
+            transactions_import_block_chunk_size: 1000,
         }
     }
 
@@ -204,6 +215,12 @@ pub struct DefaultConfiguration {
 
     /// Transaction pruning toggle
     pub enable_transaction_pruning: bool,
+
+    /// Preload security parameter
+    pub preload_security_parameter: BlockNumber,
+
+    /// Chunk size for importing transactions
+    pub transactions_import_block_chunk_size: BlockNumber,
 }
 
 impl DefaultConfiguration {
@@ -219,7 +236,9 @@ impl Default for DefaultConfiguration {
             metrics_server_ip: "0.0.0.0".to_string(),
             metrics_server_port: 9090,
             network_security_parameter: 2160, // 2160 is the mainnet value
+            preload_security_parameter: 3000,
             enable_transaction_pruning: true,
+            transactions_import_block_chunk_size: 1500,
         }
     }
 }
@@ -257,8 +276,18 @@ impl Source for DefaultConfiguration {
         );
 
         result.insert(
+            "preload_security_parameter".to_string(),
+            into_value(myself.preload_security_parameter),
+        );
+
+        result.insert(
             "enable_transaction_pruning".to_string(),
             into_value(myself.enable_transaction_pruning),
+        );
+
+        result.insert(
+            "transactions_import_block_chunk_size".to_string(),
+            into_value(myself.transactions_import_block_chunk_size),
         );
 
         Ok(result)

@@ -8,7 +8,7 @@ use slog::{debug, Logger};
 
 use mithril_common::cardano_block_scanner::{BlockScanner, ChainScannedBlocks};
 use mithril_common::crypto_helper::{MKTree, MKTreeNode};
-use mithril_common::entities::{BlockNumber, BlockRange, CardanoTransaction, ImmutableFileNumber};
+use mithril_common::entities::{BlockNumber, BlockRange, CardanoTransaction, ChainPoint};
 use mithril_common::signable_builder::TransactionsImporter;
 use mithril_common::StdResult;
 
@@ -17,7 +17,7 @@ use mithril_common::StdResult;
 #[async_trait]
 pub trait TransactionStore: Send + Sync {
     /// Get the highest known transaction beacon
-    async fn get_highest_beacon(&self) -> StdResult<Option<ImmutableFileNumber>>;
+    async fn get_highest_beacon(&self) -> StdResult<Option<ChainPoint>>;
 
     /// Store list of transactions
     async fn store_transactions(&self, transactions: Vec<CardanoTransaction>) -> StdResult<()>;
@@ -38,6 +38,15 @@ pub trait TransactionStore: Send + Sync {
         &self,
         block_ranges: Vec<(BlockRange, MKTreeNode)>,
     ) -> StdResult<()>;
+
+    /// Remove transactions and block range roots that are in a rolled-back fork
+    ///
+    /// * Remove transactions with block number strictly greater than the given block number
+    /// * Remove block range roots that have lower bound range strictly above the given block number
+    async fn remove_rolled_back_transactions_and_block_range(
+        &self,
+        block_number: BlockNumber,
+    ) -> StdResult<()>;
 }
 
 /// Import and store [CardanoTransaction].
@@ -45,7 +54,6 @@ pub struct CardanoTransactionsImporter {
     block_scanner: Arc<dyn BlockScanner>,
     transaction_store: Arc<dyn TransactionStore>,
     logger: Logger,
-    rescan_offset: Option<usize>,
     dirpath: PathBuf,
 }
 
@@ -59,55 +67,46 @@ impl CardanoTransactionsImporter {
         block_scanner: Arc<dyn BlockScanner>,
         transaction_store: Arc<dyn TransactionStore>,
         dirpath: &Path,
-        rescan_offset: Option<usize>,
         logger: Logger,
     ) -> Self {
         Self {
             block_scanner,
             transaction_store,
             logger,
-            rescan_offset,
             dirpath: dirpath.to_owned(),
         }
     }
 
-    async fn import_transactions(&self, up_to_beacon: ImmutableFileNumber) -> StdResult<()> {
-        let from = self.get_starting_beacon().await?;
+    async fn import_transactions(&self, up_to_beacon: BlockNumber) -> StdResult<()> {
+        let from = self.transaction_store.get_highest_beacon().await?;
         self.parse_and_store_transactions_not_imported_yet(from, up_to_beacon)
             .await
     }
 
-    async fn get_starting_beacon(&self) -> StdResult<Option<u64>> {
-        let highest = self.transaction_store.get_highest_beacon().await?;
-        let rescan_offset = self.rescan_offset.unwrap_or(0);
-        let highest = highest.map(|h| (h + 1).saturating_sub(rescan_offset as u64));
-        Ok(highest)
-    }
-
     async fn parse_and_store_transactions_not_imported_yet(
         &self,
-        from: Option<ImmutableFileNumber>,
-        until: ImmutableFileNumber,
+        from: Option<ChainPoint>,
+        until: BlockNumber,
     ) -> StdResult<()> {
-        if from.is_some_and(|f| f >= until) {
+        if from.as_ref().is_some_and(|f| f.block_number >= until) {
             debug!(
                 self.logger,
-                "TransactionsImporter does not need to retrieve Cardano transactions, the database is up to date for immutable '{until}'",
+                "TransactionsImporter does not need to retrieve Cardano transactions, the database is up to date for block_number '{until}'",
             );
             return Ok(());
         }
         debug!(
             self.logger,
-            "TransactionsImporter will retrieve Cardano transactions between immutables '{}' and '{until}'",
-            from.unwrap_or(0)
+            "TransactionsImporter will retrieve Cardano transactions between block_number '{}' and '{until}'",
+            from.as_ref().map(|c|c.block_number).unwrap_or(0)
         );
 
         let mut streamer = self.block_scanner.scan(&self.dirpath, from, until).await?;
 
         while let Some(blocks) = streamer.poll_next().await? {
             match blocks {
-                ChainScannedBlocks::RollForwards(blocks) => {
-                    let parsed_transactions: Vec<CardanoTransaction> = blocks
+                ChainScannedBlocks::RollForwards(forward_blocks) => {
+                    let parsed_transactions: Vec<CardanoTransaction> = forward_blocks
                         .into_iter()
                         .flat_map(|b| b.into_transactions())
                         .collect();
@@ -116,8 +115,10 @@ impl CardanoTransactionsImporter {
                         .store_transactions(parsed_transactions)
                         .await?;
                 }
-                ChainScannedBlocks::RollBackward(_) => {
-                    return Err(anyhow::anyhow!("RollBackward not supported"));
+                ChainScannedBlocks::RollBackward(chain_point) => {
+                    self.transaction_store
+                        .remove_rolled_back_transactions_and_block_range(chain_point.block_number)
+                        .await?;
                 }
             }
         }
@@ -175,7 +176,7 @@ impl CardanoTransactionsImporter {
 
 #[async_trait]
 impl TransactionsImporter for CardanoTransactionsImporter {
-    async fn import(&self, up_to_beacon: ImmutableFileNumber) -> StdResult<()> {
+    async fn import(&self, up_to_beacon: BlockNumber) -> StdResult<()> {
         self.import_transactions(up_to_beacon).await?;
         self.import_block_ranges().await
     }
@@ -183,6 +184,7 @@ impl TransactionsImporter for CardanoTransactionsImporter {
 
 #[cfg(test)]
 mod tests {
+    use mithril_persistence::sqlite::SqliteConnectionPool;
     use mockall::mock;
 
     use mithril_common::cardano_block_scanner::{
@@ -204,8 +206,8 @@ mod tests {
             async fn scan(
               &self,
               dirpath: &Path,
-              from_immutable: Option<ImmutableFileNumber>,
-              until_immutable: ImmutableFileNumber,
+              from: Option<ChainPoint>,
+              until: BlockNumber,
             ) -> StdResult<Box<dyn BlockStreamer>>;
         }
     }
@@ -219,7 +221,6 @@ mod tests {
                 scanner,
                 transaction_store,
                 Path::new(""),
-                None,
                 crate::test_tools::logger_for_tests(),
             )
         }
@@ -260,26 +261,30 @@ mod tests {
     #[tokio::test]
     async fn if_nothing_stored_parse_and_store_all_transactions() {
         let connection = cardano_tx_db_connection().unwrap();
-        let repository = Arc::new(CardanoTransactionRepository::new(Arc::new(connection)));
+        let repository = Arc::new(CardanoTransactionRepository::new(Arc::new(
+            SqliteConnectionPool::build_from_connection(connection),
+        )));
 
         let blocks = vec![
             ScannedBlock::new("block_hash-1", 10, 15, 11, vec!["tx_hash-1", "tx_hash-2"]),
             ScannedBlock::new("block_hash-2", 20, 25, 12, vec!["tx_hash-3", "tx_hash-4"]),
         ];
         let expected_transactions = into_transactions(&blocks);
-        let up_to_beacon = 12;
+        let up_to_block_number = 1000;
 
         let importer = {
             let mut scanner_mock = MockBlockScannerImpl::new();
             scanner_mock
                 .expect_scan()
-                .withf(move |_, from, until| from.is_none() && until == &up_to_beacon)
-                .return_once(move |_, _, _| Ok(Box::new(DumbBlockStreamer::new(vec![blocks]))));
+                .withf(move |_, from, until| from.is_none() && until == &up_to_block_number)
+                .return_once(move |_, _, _| {
+                    Ok(Box::new(DumbBlockStreamer::new().forwards(vec![blocks])))
+                });
             CardanoTransactionsImporter::new_for_test(Arc::new(scanner_mock), repository.clone())
         };
 
         importer
-            .import_transactions(up_to_beacon)
+            .import_transactions(up_to_block_number)
             .await
             .expect("Transactions Importer should succeed");
 
@@ -290,7 +295,9 @@ mod tests {
     #[tokio::test]
     async fn if_nothing_stored_parse_and_store_all_block_ranges() {
         let connection = cardano_tx_db_connection().unwrap();
-        let repository = Arc::new(CardanoTransactionRepository::new(Arc::new(connection)));
+        let repository = Arc::new(CardanoTransactionRepository::new(Arc::new(
+            SqliteConnectionPool::build_from_connection(connection),
+        )));
 
         let blocks = build_blocks(0, BlockRange::LENGTH * 5 + 1);
         let transactions = into_transactions(&blocks);
@@ -325,7 +332,9 @@ mod tests {
     #[tokio::test]
     async fn if_theres_gap_between_two_stored_block_ranges_it_can_still_compute_their_root() {
         let connection = cardano_tx_db_connection().unwrap();
-        let repository = Arc::new(CardanoTransactionRepository::new(Arc::new(connection)));
+        let repository = Arc::new(CardanoTransactionRepository::new(Arc::new(
+            SqliteConnectionPool::build_from_connection(connection),
+        )));
 
         // Two block ranges with a gap
         let blocks: Vec<ScannedBlock> = [
@@ -362,7 +371,9 @@ mod tests {
     #[tokio::test]
     async fn if_all_block_ranges_computed_nothing_computed_and_stored() {
         let connection = cardano_tx_db_connection().unwrap();
-        let repository = Arc::new(CardanoTransactionRepository::new(Arc::new(connection)));
+        let repository = Arc::new(CardanoTransactionRepository::new(Arc::new(
+            SqliteConnectionPool::build_from_connection(connection),
+        )));
 
         let importer = CardanoTransactionsImporter::new_for_test(
             Arc::new(MockBlockScannerImpl::new()),
@@ -383,15 +394,17 @@ mod tests {
 
     #[tokio::test]
     async fn if_all_transactions_stored_nothing_is_parsed_and_stored() {
-        let up_to_beacon = 12;
+        let up_to_block_number = 12;
         let connection = cardano_tx_db_connection().unwrap();
-        let repository = Arc::new(CardanoTransactionRepository::new(Arc::new(connection)));
-        let scanner = DumbBlockScanner::new(vec![
+        let repository = Arc::new(CardanoTransactionRepository::new(Arc::new(
+            SqliteConnectionPool::build_from_connection(connection),
+        )));
+        let scanner = DumbBlockScanner::new().forwards(vec![vec![
             ScannedBlock::new("block_hash-1", 10, 15, 10, vec!["tx_hash-1", "tx_hash-2"]),
             ScannedBlock::new("block_hash-2", 20, 25, 11, vec!["tx_hash-3", "tx_hash-4"]),
-        ]);
+        ]]);
 
-        let last_tx = CardanoTransaction::new("tx-20", 30, 35, "block_hash-3", up_to_beacon);
+        let last_tx = CardanoTransaction::new("tx-20", 30, 35, "block_hash-3", up_to_block_number);
         repository
             .store_transactions(vec![last_tx.clone()])
             .await
@@ -401,7 +414,7 @@ mod tests {
             CardanoTransactionsImporter::new_for_test(Arc::new(scanner), repository.clone());
 
         importer
-            .import_transactions(up_to_beacon)
+            .import_transactions(up_to_block_number)
             .await
             .expect("Transactions Importer should succeed");
 
@@ -412,18 +425,26 @@ mod tests {
     #[tokio::test]
     async fn if_half_transactions_are_already_stored_the_other_half_is_parsed_and_stored() {
         let connection = cardano_tx_db_connection().unwrap();
-        let repository = Arc::new(CardanoTransactionRepository::new(Arc::new(connection)));
+        let repository = Arc::new(CardanoTransactionRepository::new(Arc::new(
+            SqliteConnectionPool::build_from_connection(connection),
+        )));
 
-        let stored_block =
-            ScannedBlock::new("block_hash-1", 10, 15, 11, vec!["tx_hash-1", "tx_hash-2"]);
+        let highest_stored_chain_point = ChainPoint::new(134, 10, "block_hash-1");
+        let stored_block = ScannedBlock::new(
+            highest_stored_chain_point.block_hash.clone(),
+            highest_stored_chain_point.block_number,
+            highest_stored_chain_point.slot_number,
+            5,
+            vec!["tx_hash-1", "tx_hash-2"],
+        );
         let to_store_block =
-            ScannedBlock::new("block_hash-2", 20, 25, 12, vec!["tx_hash-3", "tx_hash-4"]);
+            ScannedBlock::new("block_hash-2", 20, 229, 8, vec!["tx_hash-3", "tx_hash-4"]);
         let expected_transactions: Vec<CardanoTransaction> = [
             stored_block.clone().into_transactions(),
             to_store_block.clone().into_transactions(),
         ]
         .concat();
-        let up_to_beacon = 14;
+        let up_to_block_number = 22;
 
         repository
             .store_transactions(stored_block.clone().into_transactions())
@@ -435,9 +456,14 @@ mod tests {
             let mut scanner_mock = MockBlockScannerImpl::new();
             scanner_mock
                 .expect_scan()
-                .withf(move |_, from, until| from == &Some(12) && until == &up_to_beacon)
+                .withf(move |_, from, until| {
+                    from == &Some(highest_stored_chain_point.clone())
+                        && *until == up_to_block_number
+                })
                 .return_once(move |_, _, _| {
-                    Ok(Box::new(DumbBlockStreamer::new(vec![scanned_blocks])))
+                    Ok(Box::new(
+                        DumbBlockStreamer::new().forwards(vec![scanned_blocks]),
+                    ))
                 })
                 .once();
             CardanoTransactionsImporter::new_for_test(Arc::new(scanner_mock), repository.clone())
@@ -447,7 +473,7 @@ mod tests {
         assert_eq!(stored_block.into_transactions(), stored_transactions);
 
         importer
-            .import_transactions(up_to_beacon)
+            .import_transactions(up_to_block_number)
             .await
             .expect("Transactions Importer should succeed");
 
@@ -458,7 +484,9 @@ mod tests {
     #[tokio::test]
     async fn if_half_block_ranges_are_stored_the_other_half_is_computed_and_stored() {
         let connection = cardano_tx_db_connection().unwrap();
-        let repository = Arc::new(CardanoTransactionRepository::new(Arc::new(connection)));
+        let repository = Arc::new(CardanoTransactionRepository::new(Arc::new(
+            SqliteConnectionPool::build_from_connection(connection),
+        )));
 
         let blocks = build_blocks(0, BlockRange::LENGTH * 4 + 1);
         let transactions = into_transactions(&blocks);
@@ -566,7 +594,9 @@ mod tests {
     #[tokio::test]
     async fn compute_block_range_merkle_root() {
         let connection = cardano_tx_db_connection().unwrap();
-        let repository = Arc::new(CardanoTransactionRepository::new(Arc::new(connection)));
+        let repository = Arc::new(CardanoTransactionRepository::new(Arc::new(
+            SqliteConnectionPool::build_from_connection(connection),
+        )));
 
         // 2 block ranges worth of blocks with one more block that should be ignored for merkle root computation
         let blocks = build_blocks(0, BlockRange::LENGTH * 2 + 1);
@@ -613,26 +643,28 @@ mod tests {
             ScannedBlock::new("block_hash-1", 10, 15, 11, vec!["tx_hash-1", "tx_hash-2"]),
             ScannedBlock::new("block_hash-2", 20, 25, 12, vec!["tx_hash-3", "tx_hash-4"]),
         ];
+        let up_to_block_number = 1000;
         let transactions = into_transactions(&blocks);
 
         let (importer, repository) = {
-            let connection = Arc::new(cardano_tx_db_connection().unwrap());
-            let repository = Arc::new(CardanoTransactionRepository::new(connection.clone()));
+            let connection = cardano_tx_db_connection().unwrap();
+            let connection_pool = Arc::new(SqliteConnectionPool::build_from_connection(connection));
+            let repository = Arc::new(CardanoTransactionRepository::new(connection_pool));
             let importer = CardanoTransactionsImporter::new_for_test(
-                Arc::new(DumbBlockScanner::new(blocks.clone())),
-                Arc::new(CardanoTransactionRepository::new(connection.clone())),
+                Arc::new(DumbBlockScanner::new().forwards(vec![blocks.clone()])),
+                repository.clone(),
             );
             (importer, repository)
         };
 
         importer
-            .import(12)
+            .import(up_to_block_number)
             .await
             .expect("Transactions Importer should succeed");
         let cold_imported_transactions = repository.get_all().await.unwrap();
 
         importer
-            .import(12)
+            .import(up_to_block_number)
             .await
             .expect("Transactions Importer should succeed");
         let warm_imported_transactions = repository.get_all().await.unwrap();
@@ -642,34 +674,105 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn change_parsed_lower_bound_when_rescan_limit_is_set() {
-        fn importer_with_offset(
-            highest_stored_beacon: ImmutableFileNumber,
-            rescan_offset: ImmutableFileNumber,
-        ) -> CardanoTransactionsImporter {
-            let mut store = MockTransactionStore::new();
-            store
-                .expect_get_highest_beacon()
-                .returning(move || Ok(Some(highest_stored_beacon)));
+    async fn when_rollbackward_should_remove_transactions() {
+        let connection = cardano_tx_db_connection().unwrap();
+        let repository = Arc::new(CardanoTransactionRepository::new(Arc::new(
+            SqliteConnectionPool::build_from_connection(connection),
+        )));
 
-            CardanoTransactionsImporter::new(
-                Arc::new(MockBlockScannerImpl::new()),
-                Arc::new(store),
-                Path::new(""),
-                Some(rescan_offset as usize),
-                crate::test_tools::logger_for_tests(),
+        let expected_remaining_transactions =
+            ScannedBlock::new("block_hash-130", 130, 5, 1, vec!["tx_hash-6", "tx_hash-7"])
+                .into_transactions();
+        repository
+            .store_transactions(expected_remaining_transactions.clone())
+            .await
+            .unwrap();
+        repository
+            .store_transactions(
+                ScannedBlock::new(
+                    "block_hash-131",
+                    131,
+                    10,
+                    2,
+                    vec!["tx_hash-8", "tx_hash-9", "tx_hash-10"],
+                )
+                .into_transactions(),
             )
-        }
-        let importer = importer_with_offset(8, 3);
+            .await
+            .unwrap();
 
-        let from = importer.get_starting_beacon().await.unwrap();
-        // Expected should be: highest_stored_beacon + 1 - rescan_offset
-        assert_eq!(Some(6), from);
+        let chain_point = ChainPoint::new(1, 130, "block_hash-131");
+        let scanner = DumbBlockScanner::new().backward(chain_point);
 
-        let importer = importer_with_offset(5, 10);
+        let importer =
+            CardanoTransactionsImporter::new_for_test(Arc::new(scanner), repository.clone());
 
-        let from = importer.get_starting_beacon().await.unwrap();
-        // If sub overflow it should be 0
-        assert_eq!(Some(0), from);
+        importer
+            .import(3000)
+            .await
+            .expect("Transactions Importer should succeed");
+
+        let stored_transactions = repository.get_all().await.unwrap();
+        assert_eq!(expected_remaining_transactions, stored_transactions);
+    }
+
+    #[tokio::test]
+    async fn when_rollbackward_should_remove_block_ranges() {
+        let connection = cardano_tx_db_connection().unwrap();
+        let repository = Arc::new(CardanoTransactionRepository::new(Arc::new(
+            SqliteConnectionPool::build_from_connection(connection),
+        )));
+
+        let expected_remaining_block_ranges = vec![
+            BlockRange::from_block_number(0),
+            BlockRange::from_block_number(BlockRange::LENGTH),
+            BlockRange::from_block_number(BlockRange::LENGTH * 2),
+        ];
+
+        repository
+            .store_block_range_roots(
+                expected_remaining_block_ranges
+                    .iter()
+                    .map(|b| (b.clone(), MKTreeNode::from_hex("AAAA").unwrap()))
+                    .collect(),
+            )
+            .await
+            .unwrap();
+        repository
+            .store_block_range_roots(
+                [
+                    BlockRange::from_block_number(BlockRange::LENGTH * 3),
+                    BlockRange::from_block_number(BlockRange::LENGTH * 4),
+                    BlockRange::from_block_number(BlockRange::LENGTH * 5),
+                ]
+                .iter()
+                .map(|b| (b.clone(), MKTreeNode::from_hex("AAAA").unwrap()))
+                .collect(),
+            )
+            .await
+            .unwrap();
+
+        let block_range_roots = repository.get_all_block_range_root().unwrap();
+        assert_eq!(6, block_range_roots.len());
+
+        let chain_point = ChainPoint::new(1, BlockRange::LENGTH * 3, "block_hash-131");
+        let scanner = DumbBlockScanner::new().backward(chain_point);
+
+        let importer =
+            CardanoTransactionsImporter::new_for_test(Arc::new(scanner), repository.clone());
+
+        importer
+            .import(3000)
+            .await
+            .expect("Transactions Importer should succeed");
+
+        let block_range_roots = repository.get_all_block_range_root().unwrap();
+        assert_eq!(
+            expected_remaining_block_ranges,
+            block_range_roots
+                .into_iter()
+                .map(|r| r.range)
+                .collect::<Vec<_>>()
+        );
     }
 }

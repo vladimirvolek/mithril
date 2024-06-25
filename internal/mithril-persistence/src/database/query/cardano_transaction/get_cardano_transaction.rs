@@ -29,12 +29,19 @@ impl GetCardanoTransactionQuery {
         }
     }
 
-    pub fn by_transaction_hashes(transactions_hashes: Vec<TransactionHash>) -> Self {
+    pub fn by_transaction_hashes(
+        transactions_hashes: Vec<TransactionHash>,
+        up_to_or_equal: BlockNumber,
+    ) -> Self {
         let hashes_values = transactions_hashes.into_iter().map(Value::String).collect();
+        let condition = WhereCondition::where_in("transaction_hash", hashes_values).and_where(
+            WhereCondition::new(
+                "block_number <= ?*",
+                vec![Value::Integer(up_to_or_equal as i64)],
+            ),
+        );
 
-        Self {
-            condition: WhereCondition::where_in("transaction_hash", hashes_values),
-        }
+        Self { condition }
     }
 
     pub fn by_block_ranges(block_ranges: Vec<BlockRange>) -> Self {
@@ -64,6 +71,15 @@ impl GetCardanoTransactionQuery {
 
         Self { condition }
     }
+
+    pub fn with_highest_block_number() -> Self {
+        Self {
+            condition: WhereCondition::new(
+                "block_number = (select max(block_number) from cardano_tx)",
+                vec![],
+            ),
+        }
+    }
 }
 
 impl Query for GetCardanoTransactionQuery {
@@ -78,5 +94,51 @@ impl Query for GetCardanoTransactionQuery {
         let projection = Self::Entity::get_projection().expand(aliases);
 
         format!("select {projection} from cardano_tx where {condition} order by block_number, transaction_hash")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::database::query::InsertCardanoTransactionQuery;
+    use crate::database::test_helper::cardano_tx_db_connection;
+    use crate::sqlite::{ConnectionExtensions, SqliteConnection};
+
+    use super::*;
+
+    fn insert_transactions(connection: &SqliteConnection, records: Vec<CardanoTransactionRecord>) {
+        connection
+            .fetch_first(InsertCardanoTransactionQuery::insert_many(records).unwrap())
+            .unwrap();
+    }
+
+    #[test]
+    fn with_highest_block_number() {
+        let connection = cardano_tx_db_connection().unwrap();
+
+        let cursor = connection
+            .fetch(GetCardanoTransactionQuery::with_highest_block_number())
+            .unwrap();
+        assert_eq!(0, cursor.count());
+
+        insert_transactions(
+            &connection,
+            vec![
+                CardanoTransactionRecord::new("tx-hash-0", 10, 50, "block-hash-10", 1),
+                CardanoTransactionRecord::new("tx-hash-1", 10, 51, "block-hash-10", 1),
+                CardanoTransactionRecord::new("tx-hash-2", 11, 54, "block-hash-11", 1),
+                CardanoTransactionRecord::new("tx-hash-3", 11, 55, "block-hash-11", 1),
+            ],
+        );
+
+        let records: Vec<CardanoTransactionRecord> = connection
+            .fetch_collect(GetCardanoTransactionQuery::with_highest_block_number())
+            .unwrap();
+        assert_eq!(
+            vec![
+                CardanoTransactionRecord::new("tx-hash-2", 11, 54, "block-hash-11", 1),
+                CardanoTransactionRecord::new("tx-hash-3", 11, 55, "block-hash-11", 1),
+            ],
+            records
+        );
     }
 }

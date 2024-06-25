@@ -1,3 +1,4 @@
+use mithril_persistence::sqlite::SqliteConnectionPool;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -8,11 +9,12 @@ use mithril_common::{
     chain_observer::ChainObserver,
     crypto_helper::ProtocolGenesisVerifier,
     digesters::{ImmutableDigester, ImmutableFileObserver},
-    entities::{Epoch, ProtocolParameters, SignerWithStake, StakeDistribution},
+    entities::{Epoch, ProtocolParameters, SignedEntityConfig, SignerWithStake, StakeDistribution},
     era::{EraChecker, EraReader},
     signable_builder::SignableBuilderService,
+    signed_entity_type_lock::SignedEntityTypeLock,
     test_utils::MithrilFixture,
-    TimePointProvider,
+    TickerService,
 };
 use mithril_persistence::{sqlite::SqliteConnection, store::StakeStorer};
 
@@ -26,7 +28,7 @@ use crate::{
     multi_signer::MultiSigner,
     services::{
         CertifierService, EpochService, MessageService, ProverService, SignedEntityService,
-        StakeDistributionService, TickerService, TransactionStore,
+        StakeDistributionService, TransactionStore,
     },
     signer_registerer::SignerRecorder,
     snapshot_uploaders::SnapshotUploader,
@@ -45,13 +47,17 @@ pub struct DependencyContainer {
     /// Configuration structure.
     pub config: Configuration,
 
+    /// Signed entity configuration.
+    pub signed_entity_config: SignedEntityConfig,
+
     /// SQLite database connection
-    /// This is not a real service but is is needed to instantiate all store
-    /// services. Shall be private dependency.
+    ///
+    /// This is not a real service, but it is needed to instantiate all store
+    /// services. Should be a private dependency.
     pub sqlite_connection: Arc<SqliteConnection>,
 
-    /// SQLite database connection for Cardano transactions
-    pub sqlite_connection_transaction: Arc<SqliteConnection>,
+    /// Cardano transactions SQLite database connection pool
+    pub sqlite_connection_cardano_transaction_pool: Arc<SqliteConnectionPool>,
 
     /// Stake Store used by the StakeDistributionService
     /// It shall be a private dependency.
@@ -80,9 +86,6 @@ pub struct DependencyContainer {
 
     /// Chain observer service.
     pub chain_observer: Arc<dyn ChainObserver>,
-
-    /// Time point provider service.
-    pub time_point_provider: Arc<dyn TimePointProvider>,
 
     /// Cardano transactions store.
     pub transaction_store: Arc<dyn TransactionStore>,
@@ -155,6 +158,9 @@ pub struct DependencyContainer {
 
     /// Prover service
     pub prover_service: Arc<dyn ProverService>,
+
+    /// Signed Entity Type Lock
+    pub signed_entity_type_lock: Arc<SignedEntityTypeLock>,
 }
 
 #[doc(hidden)]

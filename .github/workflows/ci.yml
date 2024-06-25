@@ -75,11 +75,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ macos-12, windows-latest ]
+        os: [ macos-12, macos-14, windows-latest ]
 
         include:
           # Only build client on windows & mac
           - os: macos-12
+            binaries-build-args: --bin mithril-client --features bundle_openssl
+            libraries-build-args: --package mithril-stm --package mithril-client --features full,unstable
+          - os: macos-14
             binaries-build-args: --bin mithril-client --features bundle_openssl
             libraries-build-args: --package mithril-stm --package mithril-client --features full,unstable
           - os: windows-latest
@@ -163,13 +166,15 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ ubuntu-22.04, macos-12, windows-latest ]
+        os: [ ubuntu-22.04, macos-12, macos-14, windows-latest ]
 
         include:
           - os: ubuntu-22.04
             test-args: --features full,unstable --workspace
           # Only test client on windows & mac (since its the only binaries supported for those os for now)
           - os: macos-12
+            test-args: --package mithril-client --package mithril-client-cli --features full,unstable
+          - os: macos-14
             test-args: --package mithril-client --package mithril-client-cli --features full,unstable
           - os: windows-latest
             test-args: --package mithril-client --package mithril-client-cli --features full,unstable
@@ -520,6 +525,12 @@ jobs:
           name: mithril-distribution-macOS-X64
           path: ./package-macOS-X64
 
+      - name: Download built artifacts (macOS-ARM64)
+        uses: actions/download-artifact@v4
+        with:
+          name: mithril-distribution-macOS-ARM64
+          path: ./package-macOS-ARM64
+
       - name: Download built artifacts (Windows-X64)
         uses: actions/download-artifact@v4
         with:
@@ -667,6 +678,7 @@ jobs:
           mithril_aggregator_cexplorer_pools_url: ${{ vars.AGGREGATOR_CEXPLORER_POOLS_URL }}
           mithril_aggregator_allow_unparsable_block:  ${{ vars.AGGREGATOR_ALLOW_UNPARSABLE_BLOCK }}
           mithril_aggregator_cardano_transactions_prover_cache_pool_size: ${{ vars.AGGREGATOR_CARDANO_TRANSACTIONS_PROVER_CACHE_POOL_SIZE }}
+          cardano_transactions_database_connection_pool_size: ${{ vars.AGGREGATOR_CARDANO_TRANSACTIONS_DATABASE_CONNECTION_POOL_SIZE }}
           prometheus_auth_username: ${{ secrets.PROMETHEUS_AUTH_USERNAME }}
           prometheus_auth_password: ${{ secrets.PROMETHEUS_AUTH_PASSWORD }}
           prometheus_ingest_host: ${{ vars.PROMETHEUS_INGEST_HOST }}

@@ -134,7 +134,7 @@ impl Runner for SignerRunner {
         debug!("RUNNER: get_current_time_point");
 
         self.services
-            .time_point_provider
+            .ticker_service
             .get_current_time_point()
             .await
             .with_context(|| "Runner can not get current time point")
@@ -242,6 +242,15 @@ impl Runner for SignerRunner {
 
     async fn can_i_sign(&self, pending_certificate: &CertificatePending) -> StdResult<bool> {
         debug!("RUNNER: can_i_sign");
+        if self
+            .services
+            .signed_entity_type_lock
+            .is_locked(&pending_certificate.signed_entity_type)
+            .await
+        {
+            debug!(" > signed entity type is locked, can NOT sign");
+            return Ok(false);
+        }
 
         if let Some(signer) =
             pending_certificate.get_signer(self.services.single_signer.get_party_id())
@@ -450,18 +459,20 @@ mod tests {
     use mithril_common::{
         api_version::APIVersionProvider,
         cardano_block_scanner::DumbBlockScanner,
+        cardano_transactions_preloader::CardanoTransactionsPreloader,
         chain_observer::{ChainObserver, FakeObserver},
         crypto_helper::{MKMap, MKMapNode, MKTreeNode, ProtocolInitializer},
         digesters::{DumbImmutableDigester, DumbImmutableFileObserver},
-        entities::{BlockRange, CardanoDbBeacon, Epoch, ImmutableFileNumber, StakeDistribution},
+        entities::{BlockNumber, BlockRange, CardanoDbBeacon, Epoch, StakeDistribution},
         era::{adapters::EraReaderBootstrapAdapter, EraChecker, EraReader},
         signable_builder::{
             BlockRangeRootRetriever, CardanoImmutableFilesFullSignableBuilder,
             CardanoTransactionsSignableBuilder, MithrilSignableBuilderService,
             MithrilStakeDistributionSignableBuilder,
         },
+        signed_entity_type_lock::SignedEntityTypeLock,
         test_utils::{fake_data, MithrilFixtureBuilder},
-        TimePointProvider, TimePointProviderImpl,
+        MithrilTickerService, TickerService,
     };
     use mithril_persistence::store::adapter::{DumbStoreAdapter, MemoryAdapter};
     use mithril_persistence::store::{StakeStore, StakeStorer};
@@ -482,7 +493,7 @@ mod tests {
         pub FakeTimePointProvider { }
 
         #[async_trait]
-        impl TimePointProvider for FakeTimePointProvider {
+        impl TickerService for FakeTimePointProvider {
             async fn get_current_time_point(&self) -> StdResult<TimePoint>;
         }
     }
@@ -494,12 +505,12 @@ mod tests {
         impl BlockRangeRootRetriever for BlockRangeRootRetrieverImpl {
             async fn retrieve_block_range_roots(
                 &self,
-                up_to_beacon: ImmutableFileNumber,
+                up_to_beacon: BlockNumber,
             ) -> StdResult<Box<dyn Iterator<Item = (BlockRange, MKTreeNode)>>>;
 
             async fn compute_merkle_map_from_block_range_roots(
                 &self,
-                up_to_beacon: ImmutableFileNumber,
+                up_to_beacon: BlockNumber,
             ) -> StdResult<MKMap<BlockRange, MKMapNode<BlockRange>>>;
         }
     }
@@ -511,19 +522,13 @@ mod tests {
         let fake_observer = FakeObserver::default();
         fake_observer.set_signers(stake_distribution_signers).await;
         let chain_observer = Arc::new(fake_observer);
-        let time_point_provider = Arc::new(TimePointProviderImpl::new(
+        let ticker_service = Arc::new(MithrilTickerService::new(
             chain_observer.clone(),
             Arc::new(DumbImmutableFileObserver::default()),
         ));
         let era_reader = Arc::new(EraReader::new(Arc::new(EraReaderBootstrapAdapter)));
         let era_epoch_token = era_reader
-            .read_era_epoch_token(
-                time_point_provider
-                    .get_current_time_point()
-                    .await
-                    .unwrap()
-                    .epoch,
-            )
+            .read_era_epoch_token(ticker_service.get_current_epoch().await.unwrap())
             .await
             .unwrap();
         let era_checker = Arc::new(EraChecker::new(
@@ -541,18 +546,17 @@ mod tests {
             ));
         let mithril_stake_distribution_signable_builder =
             Arc::new(MithrilStakeDistributionSignableBuilder::default());
-        let transaction_parser = Arc::new(DumbBlockScanner::new(vec![]));
+        let transaction_parser = Arc::new(DumbBlockScanner::new());
         let transaction_store = Arc::new(MockTransactionStore::new());
-        let transaction_importer = Arc::new(CardanoTransactionsImporter::new(
+        let transactions_importer = Arc::new(CardanoTransactionsImporter::new(
             transaction_parser.clone(),
             transaction_store.clone(),
             Path::new(""),
-            None,
             slog_scope::logger(),
         ));
         let block_range_root_retriever = Arc::new(MockBlockRangeRootRetrieverImpl::new());
         let cardano_transactions_builder = Arc::new(CardanoTransactionsSignableBuilder::new(
-            transaction_importer,
+            transactions_importer.clone(),
             block_range_root_retriever,
             slog_scope::logger(),
         ));
@@ -562,6 +566,15 @@ mod tests {
             cardano_transactions_builder,
         ));
         let metrics_service = Arc::new(MetricsService::new().unwrap());
+        let signed_entity_type_lock = Arc::new(SignedEntityTypeLock::default());
+        let security_parameter = 0;
+        let cardano_transactions_preloader = Arc::new(CardanoTransactionsPreloader::new(
+            signed_entity_type_lock.clone(),
+            transactions_importer.clone(),
+            security_parameter,
+            chain_observer.clone(),
+            slog_scope::logger(),
+        ));
 
         SignerServices {
             stake_store: Arc::new(StakeStore::new(Box::new(DumbStoreAdapter::new()), None)),
@@ -569,7 +582,7 @@ mod tests {
             chain_observer,
             digester,
             single_signer: Arc::new(MithrilSingleSigner::new(party_id)),
-            time_point_provider,
+            ticker_service,
             protocol_initializer_store: Arc::new(ProtocolInitializerStore::new(
                 Box::new(adapter),
                 None,
@@ -579,6 +592,8 @@ mod tests {
             api_version_provider,
             signable_builder_service,
             metrics_service,
+            signed_entity_type_lock,
+            cardano_transactions_preloader,
         }
     }
 
@@ -596,12 +611,12 @@ mod tests {
     async fn test_get_current_time_point() {
         let mut services = init_services().await;
         let expected = TimePoint::dummy();
-        let mut time_point_provider = MockFakeTimePointProvider::new();
-        time_point_provider
+        let mut ticker_service = MockFakeTimePointProvider::new();
+        ticker_service
             .expect_get_current_time_point()
             .once()
             .returning(move || Ok(TimePoint::dummy()));
-        services.time_point_provider = Arc::new(time_point_provider);
+        services.ticker_service = Arc::new(ticker_service);
         let runner = init_runner(Some(services), None).await;
 
         assert_eq!(
@@ -653,11 +668,10 @@ mod tests {
         let chain_observer = Arc::new(FakeObserver::default());
         services.chain_observer = chain_observer.clone();
         let epoch = services
-            .time_point_provider
-            .get_current_time_point()
+            .ticker_service
+            .get_current_epoch()
             .await
             .unwrap()
-            .epoch
             .offset_to_recording_epoch();
         let stakes = chain_observer
             .get_current_stake_distribution()
@@ -707,9 +721,12 @@ mod tests {
         let mut pending_certificate = fake_data::certificate_pending();
         let epoch = pending_certificate.epoch;
         let signer = &mut pending_certificate.signers[0];
+        // All signed entities are available for signing.
+        let signed_entity_type_lock = Arc::new(SignedEntityTypeLock::new());
         let mut services = init_services().await;
         let protocol_initializer_store = services.protocol_initializer_store.clone();
         services.single_signer = Arc::new(MithrilSingleSigner::new(signer.party_id.to_owned()));
+        services.signed_entity_type_lock = signed_entity_type_lock.clone();
         let runner = init_runner(Some(services), None).await;
 
         let protocol_initializer = MithrilProtocolInitializerBuilder::build(
@@ -732,6 +749,17 @@ mod tests {
 
         let can_i_sign_result = runner.can_i_sign(&pending_certificate).await.unwrap();
         assert!(can_i_sign_result);
+
+        // Lock the pending certificate signed entity type, the signer should not be able to sign.
+        signed_entity_type_lock
+            .lock(&pending_certificate.signed_entity_type)
+            .await;
+
+        let can_i_sign_result = runner.can_i_sign(&pending_certificate).await.unwrap();
+        assert!(
+            !can_i_sign_result,
+            "The signer should not be able to sign when the signed entity type is locked."
+        );
     }
 
     #[tokio::test]
@@ -768,7 +796,7 @@ mod tests {
     async fn test_compute_message() {
         let mut services = init_services().await;
         let current_time_point = services
-            .time_point_provider
+            .ticker_service
             .get_current_time_point()
             .await
             .expect("get_current_time_point should not fail");
@@ -821,7 +849,7 @@ mod tests {
     async fn test_compute_single_signature() {
         let mut services = init_services().await;
         let current_time_point = services
-            .time_point_provider
+            .ticker_service
             .get_current_time_point()
             .await
             .expect("get_current_time_point should not fail");
@@ -890,9 +918,9 @@ mod tests {
     #[tokio::test]
     async fn test_update_era_checker() {
         let services = init_services().await;
-        let time_point_provider = services.time_point_provider.clone();
+        let ticker_service = services.ticker_service.clone();
         let era_checker = services.era_checker.clone();
-        let mut time_point = time_point_provider.get_current_time_point().await.unwrap();
+        let mut time_point = ticker_service.get_current_time_point().await.unwrap();
 
         assert_eq!(time_point.epoch, era_checker.current_epoch());
         let runner = init_runner(Some(services), None).await;

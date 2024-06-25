@@ -5,7 +5,7 @@ use crate::{
 };
 
 use anyhow::Context;
-use mithril_common::entities::{SignedEntityType, TimePoint};
+use mithril_common::entities::TimePoint;
 use slog_scope::{crit, info, trace, warn};
 use std::fmt::Display;
 use std::sync::Arc;
@@ -234,11 +234,13 @@ impl AggregatorRuntime {
                     .map(|om| om.is_expired)
                     .unwrap_or(false);
                 let exists_newer_open_message = {
-                    let new_signed_entity_type = SignedEntityType::from_time_point(
-                        &state.open_message.signed_entity_type.clone().into(),
-                        &self.config.network.to_string(),
-                        &last_time_point,
-                    );
+                    let new_signed_entity_type = self
+                        .config
+                        .signed_entity_config
+                        .time_point_to_signed_entity(
+                            &state.open_message.signed_entity_type,
+                            &last_time_point,
+                        );
                     new_signed_entity_type != state.open_message.signed_entity_type
                 };
 
@@ -406,7 +408,7 @@ mod tests {
     use mockall::predicate;
     use std::time::Duration;
 
-    use mithril_common::entities::{Epoch, SignedEntityType};
+    use mithril_common::entities::{Epoch, SignedEntityConfig, SignedEntityType};
     use mithril_common::test_utils::fake_data;
 
     use super::super::runner::MockAggregatorRunner;
@@ -417,7 +419,7 @@ mod tests {
         runner: MockAggregatorRunner,
     ) -> AggregatorRuntime {
         AggregatorRuntime::new(
-            AggregatorConfig::new(Duration::from_millis(20), fake_data::network()),
+            AggregatorConfig::new(Duration::from_millis(20), SignedEntityConfig::dummy()),
             init_state,
             Arc::new(runner),
         )

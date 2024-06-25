@@ -4,29 +4,36 @@ use anyhow::anyhow;
 use async_trait::async_trait;
 use mithril_common::{
     entities::{
-        CardanoDbBeacon, CertificatePending, Epoch, EpochSettings, SignedEntityType, Signer,
-        SingleSignatures, TimePoint,
+        CertificatePending, Epoch, EpochSettings, SignedEntityConfig, SignedEntityType,
+        SignedEntityTypeDiscriminants, Signer, SingleSignatures, TimePoint,
     },
     test_utils::fake_data,
-    CardanoNetwork, TimePointProvider, TimePointProviderImpl,
+    MithrilTickerService, TickerService,
 };
 use mithril_signer::{AggregatorClient, AggregatorClientError};
 use tokio::sync::RwLock;
 
 pub struct FakeAggregator {
-    network: CardanoNetwork,
+    signed_entity_config: SignedEntityConfig,
     registered_signers: RwLock<HashMap<Epoch, Vec<Signer>>>,
-    time_point_provider: Arc<TimePointProviderImpl>,
+    ticker_service: Arc<MithrilTickerService>,
+    current_certificate_pending_signed_entity: RwLock<SignedEntityTypeDiscriminants>,
     withhold_epoch_settings: RwLock<bool>,
 }
 
 impl FakeAggregator {
-    pub fn new(network: CardanoNetwork, time_point_provider: Arc<TimePointProviderImpl>) -> Self {
+    pub fn new(
+        signed_entity_config: SignedEntityConfig,
+        ticker_service: Arc<MithrilTickerService>,
+    ) -> Self {
         Self {
-            network,
-            withhold_epoch_settings: RwLock::new(true),
+            signed_entity_config,
             registered_signers: RwLock::new(HashMap::new()),
-            time_point_provider,
+            ticker_service,
+            current_certificate_pending_signed_entity: RwLock::new(
+                SignedEntityTypeDiscriminants::CardanoImmutableFilesFull,
+            ),
+            withhold_epoch_settings: RwLock::new(true),
         }
     }
 
@@ -41,9 +48,17 @@ impl FakeAggregator {
         *settings = false;
     }
 
+    pub async fn change_certificate_pending_signed_entity(
+        &self,
+        discriminant: SignedEntityTypeDiscriminants,
+    ) {
+        let mut signed_entity = self.current_certificate_pending_signed_entity.write().await;
+        *signed_entity = discriminant;
+    }
+
     async fn get_time_point(&self) -> Result<TimePoint, AggregatorClientError> {
         let time_point = self
-            .time_point_provider
+            .ticker_service
             .get_current_time_point()
             .await
             .map_err(|e| AggregatorClientError::RemoteServerTechnical(anyhow!(e)))?;
@@ -76,15 +91,14 @@ impl AggregatorClient for FakeAggregator {
         if store.is_empty() {
             return Ok(None);
         }
+
+        let current_signed_entity = *self.current_certificate_pending_signed_entity.read().await;
         let time_point = self.get_time_point().await?;
-        let beacon = CardanoDbBeacon::new(
-            self.network.to_string(),
-            *time_point.epoch,
-            time_point.immutable_file_number,
-        );
         let mut certificate_pending = CertificatePending {
             epoch: time_point.epoch,
-            signed_entity_type: SignedEntityType::CardanoImmutableFilesFull(beacon),
+            signed_entity_type: self
+                .signed_entity_config
+                .time_point_to_signed_entity(current_signed_entity, &time_point),
             ..fake_data::certificate_pending()
         };
 
@@ -131,7 +145,6 @@ mod tests {
     use mithril_common::digesters::DumbImmutableFileObserver;
     use mithril_common::entities::ChainPoint;
     use mithril_common::test_utils::fake_data;
-    use mithril_common::CardanoNetwork;
 
     use super::*;
 
@@ -143,14 +156,14 @@ mod tests {
             immutable_file_number: 1,
             chain_point: ChainPoint::dummy(),
         })));
-        let time_point_provider = Arc::new(TimePointProviderImpl::new(
+        let ticker_service = Arc::new(MithrilTickerService::new(
             chain_observer.clone(),
             immutable_observer.clone(),
         ));
 
         (
             chain_observer,
-            FakeAggregator::new(CardanoNetwork::DevNet(42), time_point_provider),
+            FakeAggregator::new(SignedEntityConfig::dummy(), ticker_service),
         )
     }
 

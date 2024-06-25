@@ -5,20 +5,24 @@
 mod condition;
 mod connection_builder;
 mod connection_extensions;
+mod connection_pool;
 mod cursor;
 mod entity;
 mod projection;
 mod query;
 mod source_alias;
+mod transaction;
 
 pub use condition::{GetAllCondition, WhereCondition};
 pub use connection_builder::{ConnectionBuilder, ConnectionOptions};
 pub use connection_extensions::ConnectionExtensions;
+pub use connection_pool::{SqliteConnectionPool, SqlitePooledConnection};
 pub use cursor::EntityCursor;
 pub use entity::{HydrationError, SqLiteEntity};
 pub use projection::{Projection, ProjectionField};
 pub use query::Query;
 pub use source_alias::SourceAlias;
+pub use transaction::Transaction;
 
 use mithril_common::StdResult;
 use sqlite::ConnectionThreadSafe;

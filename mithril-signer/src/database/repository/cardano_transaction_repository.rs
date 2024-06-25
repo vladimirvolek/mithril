@@ -3,16 +3,16 @@ use std::ops::Range;
 use async_trait::async_trait;
 
 use mithril_common::crypto_helper::MKTreeNode;
-use mithril_common::entities::{BlockNumber, BlockRange, CardanoTransaction, ImmutableFileNumber};
+use mithril_common::entities::{BlockNumber, BlockRange, CardanoTransaction, ChainPoint};
 use mithril_common::StdResult;
 use mithril_persistence::database::repository::CardanoTransactionRepository;
 
-use crate::{TransactionPruner, TransactionStore};
+use crate::{HighestTransactionBlockNumberGetter, TransactionPruner, TransactionStore};
 
 #[async_trait]
 impl TransactionStore for CardanoTransactionRepository {
-    async fn get_highest_beacon(&self) -> StdResult<Option<ImmutableFileNumber>> {
-        self.get_transaction_highest_immutable_file_number().await
+    async fn get_highest_beacon(&self) -> StdResult<Option<ChainPoint>> {
+        self.get_transaction_highest_chain_point().await
     }
 
     async fn store_transactions(&self, transactions: Vec<CardanoTransaction>) -> StdResult<()> {
@@ -45,11 +45,27 @@ impl TransactionStore for CardanoTransactionRepository {
         }
         Ok(())
     }
+
+    async fn remove_rolled_back_transactions_and_block_range(
+        &self,
+        block_number: BlockNumber,
+    ) -> StdResult<()> {
+        self.remove_rolled_back_transactions_and_block_range(block_number)
+            .await
+    }
 }
 
 #[async_trait]
 impl TransactionPruner for CardanoTransactionRepository {
     async fn prune(&self, number_of_blocks_to_keep: BlockNumber) -> StdResult<()> {
         self.prune_transaction(number_of_blocks_to_keep).await
+    }
+}
+
+#[async_trait]
+impl HighestTransactionBlockNumberGetter for CardanoTransactionRepository {
+    async fn get(&self) -> StdResult<Option<BlockNumber>> {
+        let highest_chain_point = self.get_transaction_highest_chain_point().await?;
+        Ok(highest_chain_point.map(|c| c.block_number))
     }
 }

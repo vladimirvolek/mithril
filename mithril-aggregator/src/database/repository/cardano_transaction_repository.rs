@@ -4,8 +4,7 @@ use async_trait::async_trait;
 
 use mithril_common::crypto_helper::MKTreeNode;
 use mithril_common::entities::{
-    BlockNumber, BlockRange, CardanoDbBeacon, CardanoTransaction, ImmutableFileNumber,
-    TransactionHash,
+    BlockNumber, BlockRange, CardanoTransaction, ChainPoint, TransactionHash,
 };
 use mithril_common::StdResult;
 use mithril_persistence::database::repository::CardanoTransactionRepository;
@@ -14,8 +13,8 @@ use crate::services::{TransactionStore, TransactionsRetriever};
 
 #[async_trait]
 impl TransactionStore for CardanoTransactionRepository {
-    async fn get_highest_beacon(&self) -> StdResult<Option<ImmutableFileNumber>> {
-        self.get_transaction_highest_immutable_file_number().await
+    async fn get_highest_beacon(&self) -> StdResult<Option<ChainPoint>> {
+        self.get_transaction_highest_chain_point().await
     }
 
     async fn store_transactions(&self, transactions: Vec<CardanoTransaction>) -> StdResult<()> {
@@ -48,29 +47,30 @@ impl TransactionStore for CardanoTransactionRepository {
         }
         Ok(())
     }
+
+    async fn remove_rolled_back_transactions_and_block_range(
+        &self,
+        block_number: BlockNumber,
+    ) -> StdResult<()> {
+        self.remove_rolled_back_transactions_and_block_range(block_number)
+            .await
+    }
 }
 
 #[async_trait]
 impl TransactionsRetriever for CardanoTransactionRepository {
-    async fn get_up_to(&self, beacon: &CardanoDbBeacon) -> StdResult<Vec<CardanoTransaction>> {
-        self.get_transactions_up_to(beacon.immutable_file_number)
+    async fn get_by_hashes(
+        &self,
+        hashes: Vec<TransactionHash>,
+        up_to: BlockNumber,
+    ) -> StdResult<Vec<CardanoTransaction>> {
+        self.get_transaction_by_hashes(hashes, up_to)
             .await
             .map(|v| {
                 v.into_iter()
                     .map(|record| record.into())
                     .collect::<Vec<CardanoTransaction>>()
             })
-    }
-
-    async fn get_by_hashes(
-        &self,
-        hashes: Vec<TransactionHash>,
-    ) -> StdResult<Vec<CardanoTransaction>> {
-        self.get_transaction_by_hashes(hashes).await.map(|v| {
-            v.into_iter()
-                .map(|record| record.into())
-                .collect::<Vec<CardanoTransaction>>()
-        })
     }
 
     async fn get_by_block_ranges(
