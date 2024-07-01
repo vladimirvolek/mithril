@@ -79,6 +79,7 @@ impl MithrilClient {
 
         let client = ClientBuilder::aggregator(aggregator_endpoint, genesis_verification_key)
             .add_feedback_receiver(feedback_receiver)
+            .with_additional_headers(additional_headers.clone())
             .build()
             .map_err(|err| format!("{err:?}"))
             .unwrap();
